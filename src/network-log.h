@@ -88,6 +88,10 @@ public:
     static string get_local_day();
     void register_handle();
     void unregister_handle();
+    /**
+     * @brief processReset 跨进程后重置状态
+     */
+    void processReset();
     bool get_register_status()const{
         return m_registered;
     }
@@ -112,9 +116,6 @@ private:
     void check_log_path();
     /*log处理线程*/
     void run();
-    bool isValid();
-    //父进程pid
-    const pid_t m_ppid;
     shared_ptr<thread>m_thread;
     atomic<bool> m_registered;
     condition_variable m_conn;

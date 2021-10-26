@@ -214,7 +214,7 @@ void AimyLogger::log(int level,const char *file,const char *func,int line,const 
 #endif
     }
     //若进程发生了变化，不再向文件中输出log
-    if(!isValid()||!get_register_status())return;
+    if(!get_register_status())return;
     if(m_log_callback)
     {
         m_log_callback(std::string(buf.get()+info_len));
@@ -226,7 +226,6 @@ void AimyLogger::log(int level,const char *file,const char *func,int line,const 
 
 }
 bool AimyLogger::set_log_path(const string &path,const string &proname){
-    if(!isValid())return false;
     std::lock_guard<mutex> locker(m_mutex);
     if(m_fp){
         fclose(m_fp);
@@ -265,26 +264,23 @@ void AimyLogger::set_minimum_log_level(int level){
 
 void AimyLogger::set_clear_flag(bool clear)
 {
-    if(!isValid())return;
     lock_guard<mutex> locker(m_mutex);
     m_clear_flag=clear;
 }
 void AimyLogger::set_log_file_size(long size)
 {
-    if(!isValid())return;
     lock_guard<mutex> locker(m_mutex);
     m_max_file_size=size;
     if(m_max_file_size<MIN_LOG_FILE_SIZE)m_max_file_size=MIN_LOG_FILE_SIZE;
     else if(m_max_file_size>MAX_LOG_FILE_SIZE)m_max_file_size=MAX_LOG_FILE_SIZE;
 }
-AimyLogger::AimyLogger():m_ppid(getppid()),m_registered(false),m_stop(false),m_fp(nullptr),m_last_filename(""),m_save_path(string(".")+DIR_DIVISION),m_env_set(false),m_level(MIN_LOG_LEVEL),m_clear_flag(false)\
+AimyLogger::AimyLogger():m_registered(false),m_stop(false),m_fp(nullptr),m_last_filename(""),m_save_path(string(".")+DIR_DIVISION),m_env_set(false),m_level(MIN_LOG_LEVEL),m_clear_flag(false)\
   ,m_max_file_size(MIN_LOG_FILE_SIZE),m_log_callback(nullptr),m_write_error_cnt(0),m_log_to_std(true),m_log_file_cache_days(MIN_LOG_CLEAR_DAYS_DIFF),m_log_file_cache_ignore_days(MAX_LOG_CLEAR_DAYS_DIFF)
 {
 
 }
 void AimyLogger::register_handle()
 {
-    if(!isValid())return;
     if(!get_register_status()){
         m_registered.exchange(true);
         m_stop.exchange(false);
@@ -294,7 +290,6 @@ void AimyLogger::register_handle()
 }
 void AimyLogger::unregister_handle()
 {
-    if(!isValid())return;
     m_stop.exchange(true);
     {
         unique_lock<mutex>locker(m_mutex);
@@ -304,6 +299,13 @@ void AimyLogger::unregister_handle()
     m_thread.reset();
     m_registered.exchange(false);
 }
+
+void AimyLogger::processReset()
+{
+    m_stop.exchange(true);
+    m_registered.exchange(false);
+}
+
 AimyLogger::~AimyLogger(){
     if(get_register_status())unregister_handle();
 }
@@ -363,11 +365,6 @@ void AimyLogger::run(){
         fclose(m_fp);
         m_fp=nullptr;
     }
-}
-
-bool AimyLogger::isValid()
-{
-    return m_ppid==getppid();
 }
 
 void AimyLogger::set_log_callback(const MAX_LOG_CACHE_CALLBACK &callback)

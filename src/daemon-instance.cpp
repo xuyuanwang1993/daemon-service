@@ -345,6 +345,7 @@ bool Daemon::dumpConfig(const std::string &path)
 
 void Daemon::initDaemon()
 {
+    AimyLogger::Instance().processReset();
     loadConfig();
     processInitLog("init-process",Daemon::m_logPath);
     AIMY_INFO("---------------start[%d]---------------",getpid());
@@ -500,7 +501,7 @@ void Daemon::handleCommandline(int argc ,char *argv[])
         {//run
             if(argc<=next_argv_read_pos)
             {
-                fprintf(stderr,"miss config file");
+                fprintf(stderr,"miss config file\n");
                 printf("%s",helpInfo);
                 return;
             }
@@ -527,7 +528,7 @@ void Daemon::handleCommandline(int argc ,char *argv[])
             //ctl
             if(argc<=next_argv_read_pos)
             {
-                fprintf(stderr,"miss clt option");
+                fprintf(stderr,"miss clt option\n");
                 printf("%s",helpInfo);
                 return;
             }
@@ -545,7 +546,7 @@ void Daemon::handleCommandline(int argc ,char *argv[])
             auto fd=sock.build();
             if(fd<=0)
             {
-                fprintf(stderr,"init unix socket %s failed[%s]",path.c_str(),strerror(errno));
+                fprintf(stderr,"init unix socket %s failed[%s]\n",path.c_str(),strerror(errno));
                 return;
             }
             //packet
@@ -557,7 +558,7 @@ void Daemon::handleCommandline(int argc ,char *argv[])
             auto send_len=sock.send(buf.get(),max_path_size+cmd_data.size(),DAEMON_LOCAL_SERVICE_NAME);
             if(static_cast<decltype (max_path_size+cmd_data.size())>(send_len)!=(max_path_size+cmd_data.size()))
             {
-                fprintf(stderr,"unix socket send error[%s]",strerror(errno));
+                fprintf(stderr,"unix socket send error[%s]\n",strerror(errno));
                 return;
             }
             //wait answer
@@ -568,14 +569,14 @@ void Daemon::handleCommandline(int argc ,char *argv[])
                 printf("%s\n",std::string(buf.get(),recv_len).c_str());
             }
             else {
-                fprintf(stderr,"unix socket recv error[%s]",strerror(errno));
+                fprintf(stderr,"unix socket recv error[%s]\n",strerror(errno));
             }
         }
         else if (main_option=="-g"||main_option=="--generate") {
             std::string path="./";
             if(argc<=next_argv_read_pos)
             {
-                fprintf(stderr,"miss target path");
+                fprintf(stderr,"miss target path\n");
                 printf("%s",helpInfo);
                 return;
             }
@@ -1066,6 +1067,13 @@ pid_t DaemonSession::exec()
         auto cmd=execCmd;
         auto env_map=envMap;
         auto work_path=workPath;
+        AIMY_WARNNING("exec:%s",cmd.c_str());
+        AIMY_WARNNING("workPath:%s",work_path.c_str());
+        AIMY_WARNNING("ENV:%ld",env_map.size());
+        for(auto i:env_map)
+        {
+            AIMY_WARNNING("%s=%s",i.first.c_str(),i.second.c_str());
+        }
         ret=fork();
         if(ret<0)
         {
@@ -1079,35 +1087,9 @@ pid_t DaemonSession::exec()
             {
                 if(!i.first.empty())::setenv(i.first.c_str(),i.second.c_str(),1);
             }
-            //parser cmd
-            std::string pro_path;
-            static const int max_length=50;
-            char * argv[max_length];
-            size_t argv_set_pos=0;
-            size_t data_parser_pos=0;
-            auto cmd_len=cmd.length();
-            //dumplicate
-            std::shared_ptr<char>tmp(new char[cmd_len+1],std::default_delete<char[]>());
-            memset(tmp.get(),0,cmd_len+1);
-            memcpy(tmp.get(),cmd.c_str(),cmd_len);
-            //
-            while(data_parser_pos<cmd_len&&(tmp.get()[data_parser_pos]==' '||tmp.get()[data_parser_pos]=='\0'))++data_parser_pos;
-            while(data_parser_pos<cmd_len&&(argv_set_pos<max_length-1))
-            {
-                //search end;
-                size_t search_begin=data_parser_pos+1;
-                while(search_begin<cmd_len&&tmp.get()[search_begin]!=' '&&tmp.get()[search_begin]!='\0')++search_begin;
-                //set argv
-                argv[argv_set_pos++]=tmp.get()+data_parser_pos;
-                tmp.get()[search_begin]='\0';
-                data_parser_pos=search_begin+1;
-                while(data_parser_pos<cmd_len&&(tmp.get()[data_parser_pos]==' '||tmp.get()[data_parser_pos]=='\0'))++data_parser_pos;
-            }
-            argv[argv_set_pos]=nullptr;
-            if(argv_set_pos>0)pro_path=argv[0];
             if(!work_path.empty())chdir(work_path.c_str());
             //parser---
-            if(!pro_path.empty())execv(pro_path.c_str(),argv);
+            execl("/bin/sh", "sh", "-c", cmd.c_str(), (char *) 0);
             _Exit(0);
         }
     }while(0);
@@ -1315,7 +1297,7 @@ std::pair<string, string> DaemonSession::getStatusString()
 {
     char head_str[256]={0};
     memset(head_str,0,256);
-    snprintf(head_str,sizeof (head_str),"%-12.12s\t%-12.12s\t%-12s\t%-21.21s%-12s%-12s","taskname","status","pid","lastBootTime","bootCnt","lastRebootCnt");
+    snprintf(head_str,sizeof (head_str),"%-16.16s\t%-12.12s\t%-12s\t%-21.21s%-12s%-12s","taskname","status","pid","lastBootTime","bootCnt","lastRebootCnt");
     auto status_str_func=[](DaemonSessionStatus status)->std::string{
         switch (status) {
         case DaemonSessionExited:
@@ -1337,7 +1319,7 @@ std::pair<string, string> DaemonSession::getStatusString()
 
     char buf[256];
     memset(buf,0,256);
-    sprintf(buf,"%-12.12s\t%-12.12s\t%-12d\t%-21.21s\t%-12d\t%-12d",configName.c_str(),status_str_func(status).c_str()
+    sprintf(buf,"%-16.16s\t%-12.12s\t%-12d\t%-21.21s\t%-12d\t%-12d",configName.c_str(),status_str_func(status).c_str()
             ,pid,dateBuf,bootCnt,lastRebootCnt);
     return std::make_pair(std::string(head_str),std::string(buf));
 }

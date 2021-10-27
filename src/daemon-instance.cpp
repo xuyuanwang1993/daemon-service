@@ -357,8 +357,10 @@ void Daemon::initDaemon()
         AIMY_ERROR("init_process fork % error[%s]",strerror(errno));
     }
     else if (pid==0) {
+        auto pgid=getpgrp();
         setsid();//分离进程组
-        umask(0);//关闭进程组中所有进程
+        killpg(pgid,SIGKILL);//关闭原进程组中所有进程
+        umask(0);
         chdir("/");
 
         processInitLog("work-process",Daemon::m_logPath);
@@ -379,7 +381,6 @@ void Daemon::initDaemon()
     }
     else {
         AIMY_INFO("init_process success %d %d!",getpid(),pid);
-        kill(0,SIGKILL);//关闭进程组中所有进程
     }
 }
 

@@ -85,7 +85,6 @@ void Daemon::initDaemonSelfTask()
                 continue;
             }
             else if (pid==0) {
-                setsid();//分离进程组
                 umask(0);//
                 chdir("/");
                 checkWorkProcessTask(ppid);
@@ -356,6 +355,9 @@ void Daemon::initDaemon()
         AIMY_ERROR("init_process fork % error[%s]",strerror(errno));
     }
     else if (pid==0) {
+        setsid();//分离进程组
+        umask(0);//关闭进程组中所有进程
+        chdir("/");
 
         processInitLog("work-process",Daemon::m_logPath);
         if(!initSigleInstanceLock(Daemon::m_binName))
@@ -368,18 +370,14 @@ void Daemon::initDaemon()
         m_workDaemon=new Daemon;
         Instance().m_daemonWorker=new DaemonWorker(m_workPath);
         Instance().m_daemonWorker->setPrintIntervalSec(m_statusPrintIntervalSec);
-        setsid();//分离进程组
-        umask(0);//
-        chdir("/");
         Instance().initDaemonCommonTask();
         Instance().initDaemonSelfTask();
         Instance().mainEventLoop();
-        //不加此行会引起自守护进程变量时序异常，导致无法正常退出
-        exit(0);
+        kill(0,SIGKILL);//关闭进程组中所有进程
     }
     else {
         AIMY_INFO("init_process success %d %d!",getpid(),pid);
-        exit(0);
+        kill(0,SIGKILL);//关闭进程组中所有进程
     }
 }
 

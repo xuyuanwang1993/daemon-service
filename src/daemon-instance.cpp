@@ -8,6 +8,8 @@
 #define DAEMON_SESSION_CONFIG_FILE_EXAMPLE_NAME "app.conf.default"
 #define DAEMON_ENV_CONFIG_FILE_EXAMPLE_NAME "envExample.env.default"
 #define DAEMON_LOCAL_SERVICE_NAME "/tmp/daemon-service.service"
+#define DAEMON_SHELL_TYPE "shellscript"
+#define DAEMON_PROCESS_TYPE "process"
 using namespace aimy;
 Daemon *Daemon::m_workDaemon=nullptr;
 std::string Daemon::m_binName="daemon-test";
@@ -995,6 +997,16 @@ bool DaemonSession::loadConfig(const std::string&path)
             AIMY_ERROR("%s load[%s] failed!",__func__,path.c_str());
             break;
         }
+        auto type=parser.itemName;
+        int len=128;
+        char description[len];
+        memset(description,0,len);
+        char type_str[len];
+        memset(type_str,0,len);
+        if(sscanf(type.c_str(),"%[^=]=%s",type_str,description)==2)
+        {
+            sessionType=description;
+        }
         auto items_map=parser.configMap;
         auto &config_map=getConfigItemMap();
         for(auto i:items_map)
@@ -1065,9 +1077,12 @@ pid_t DaemonSession::exec()
         auto cmd=execCmd;
         auto env_map=envMap;
         auto work_path=workPath;
+        auto type=sessionType;
         AIMY_WARNNING("exec:%s",cmd.c_str());
         AIMY_WARNNING("workPath:%s",work_path.c_str());
+        AIMY_WARNNING("type:%s",type.c_str());
         AIMY_WARNNING("ENV:%ld",env_map.size());
+
         for(auto i:env_map)
         {
             AIMY_WARNNING("%s=%s",i.first.c_str(),i.second.c_str());
@@ -1087,7 +1102,39 @@ pid_t DaemonSession::exec()
             }
             if(!work_path.empty())chdir(work_path.c_str());
             //parser---
-            execl("/bin/sh", "sh", "-c", cmd.c_str(), (char *) 0);
+            if(type==DAEMON_SHELL_TYPE)
+            {
+                execl("/bin/sh", "sh", "-c", cmd.c_str(), (char *) 0);
+            }
+            else if (type==DAEMON_PROCESS_TYPE) {
+                std::string pro_path;
+                static const int max_length=50;
+                char * argv[max_length];
+                size_t argv_set_pos=0;
+                size_t data_parser_pos=0;
+                auto cmd_len=cmd.length();
+                //dumplicate
+                std::shared_ptr<char>tmp(new char[cmd_len+1],std::default_delete<char[]>());
+                memset(tmp.get(),0,cmd_len+1);
+                memcpy(tmp.get(),cmd.c_str(),cmd_len);
+                //
+                while(data_parser_pos<cmd_len&&(tmp.get()[data_parser_pos]==' '||tmp.get()[data_parser_pos]=='\0'))++data_parser_pos;
+                while(data_parser_pos<cmd_len&&(argv_set_pos<max_length-1))
+                {
+                    //search end;
+                    size_t search_begin=data_parser_pos+1;
+                    while(search_begin<cmd_len&&tmp.get()[search_begin]!=' '&&tmp.get()[search_begin]!='\0')++search_begin;
+                    //set argv
+                    argv[argv_set_pos++]=tmp.get()+data_parser_pos;
+                    tmp.get()[search_begin]='\0';
+                    data_parser_pos=search_begin+1;
+                    while(data_parser_pos<cmd_len&&(tmp.get()[data_parser_pos]==' '||tmp.get()[data_parser_pos]=='\0'))++data_parser_pos;
+                }
+                argv[argv_set_pos]=nullptr;
+                if(argv_set_pos>0)pro_path=argv[0];
+                if(!work_path.empty())chdir(work_path.c_str());
+                if(!pro_path.empty())execv(pro_path.c_str(),argv);
+            }
             _Exit(0);
         }
     }while(0);
@@ -1156,14 +1203,14 @@ bool DaemonSession::dumpConfig(const std::string&path)
             AIMY_ERROR("open %s failed[%s]",path.c_str(),strerror(errno));
             break;
         }
-        const static char *info_str="//this is a config file for daemon session,a valid session's config must end with \".conf\"";
+        const static char *info_str="//this is a config file for daemon session,a valid session's config must end with \".conf\"\n"
+                "//config support two exec type: \"process\" for normal program,\"shellscript\" for shell script";
         if(fprintf(fp,"%s\n",info_str)<=0)
         {
             AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
             break;
         }
-        const static char *config_str="<config>";
-        if(fprintf(fp,"%s\n",config_str)<=0)
+        if(fprintf(fp,"<config=%s>\n",sessionType.c_str())<=0)
         {
             AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
             break;
@@ -1322,7 +1369,7 @@ std::pair<string, string> DaemonSession::getStatusString()
     return std::make_pair(std::string(head_str),std::string(buf));
 }
 
-DaemonSession::DaemonSession():execCmd(""),autoStart(false),autoRestart(false)
+DaemonSession::DaemonSession():sessionType(DAEMON_PROCESS_TYPE),execCmd(""),autoStart(false),autoRestart(false)
   ,startDelayMsec(0),restartIntervalMsec(1000),workPath(""),envPath(""),pid(0),status(DaemonSessionExited)
   ,lastBootTime(0),nextBootTime(0),bootCnt(0),lastRebootCnt(0),errorBootCnt(0),configName("default")
 {
@@ -1384,7 +1431,7 @@ bool DaemonFileParser::parser(const std::string &filePath)
             break;
         }
         this->filePath=filePath;
-        itemName=context.substr(pos1+1,pos2-pos1);
+        itemName=context.substr(pos1+1,pos2-pos1-1);
         configMap.clear();
         AIMY_INFO("parse[%s] itemName:%s",filePath.c_str(),itemName.c_str());
         const char *read_ptr=context.c_str();

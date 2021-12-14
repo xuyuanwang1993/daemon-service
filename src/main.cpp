@@ -28,8 +28,6 @@ void session_test(char *argv[])
             chance_cnt=10;
         }
         auto ret=session.getStatusString();
-        printf("%s\n",ret.first.c_str());
-        printf("%s\n",ret.second.c_str());
     }
 }
 void worker_test(char *argv[])

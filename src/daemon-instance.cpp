@@ -347,23 +347,22 @@ bool Daemon::dumpConfig(const std::string &path)
 void Daemon::initDaemon()
 {
     AimyLogger::Instance().processReset();
-    loadConfig();
-    processInitLog("init-process",Daemon::m_logPath);
-    AIMY_INFO("---------------start[%d]---------------",getpid());
-    AIMY_INFO("compile_info:%s %s",__DATE__,__TIME__);
     auto pid=fork();
     if(pid<0)
     {
-        AIMY_ERROR("init_process fork % error[%s]",strerror(errno));
+        fprintf(stderr,"init_process fork  error[%s]\r\n",strerror(errno));
     }
     else if (pid==0) {
+        loadConfig();
+        processInitLog("work-process",Daemon::m_logPath);
+        AIMY_INFO("---------------start[%d]---------------",getppid());
+        AIMY_INFO("compile_info:%s %s",__DATE__,__TIME__);
         auto pgid=getpgrp();
         setsid();//分离进程组
         killpg(pgid,SIGKILL);//关闭原进程组中所有进程
         umask(0);
         chdir("/");
 
-        processInitLog("work-process",Daemon::m_logPath);
         if(!initSigleInstanceLock(Daemon::m_binName))
         {
             AIMY_ERROR("daemon is running!");
@@ -380,7 +379,7 @@ void Daemon::initDaemon()
         kill(0,SIGKILL);//关闭进程组中所有进程
     }
     else {
-        AIMY_INFO("init_process success %d %d!",getpid(),pid);
+        printf("init_process success %d %d!\r\n",getpid(),pid);
     }
 }
 
@@ -391,9 +390,6 @@ void Daemon::processInitLog(const std::string pro_name,const std::string&path)
     aimy::AimyLogger::Instance().set_log_to_std(m_logToTerminal);
     if(m_logFileSizeKBytesLimit>0)aimy::AimyLogger::Instance().set_log_file_size(m_logFileSizeKBytesLimit*1024);
     aimy::AimyLogger::Instance().register_handle();
-    atexit([](){
-        aimy::AimyLogger::Instance().unregister_handle();
-    });
 }
 
 void Daemon::generateDefaultConfig(const std::string&path)
@@ -1102,6 +1098,8 @@ pid_t DaemonSession::exec()
                 if(!i.first.empty())::setenv(i.first.c_str(),i.second.c_str(),1);
             }
             if(!work_path.empty())chdir(work_path.c_str());
+            ::close(STDOUT_FILENO);
+            ::close(STDERR_FILENO);
             //parser---
             if(type==DAEMON_SHELL_TYPE)
             {

@@ -119,8 +119,6 @@ void signal_exit_func(int signal_num){
 }
 AimyLogger *AimyLogger::m_custom_instance=nullptr;
 string AimyLogger::get_local_time(){
-    static mutex time_mutex;
-    lock_guard<mutex>locker(time_mutex);
     std::ostringstream stream;
     auto now = chrono::system_clock::now();
     time_t tt = chrono::system_clock::to_time_t(now);
@@ -140,12 +138,9 @@ string AimyLogger::get_local_time(){
 
 string AimyLogger::get_local_day()
 {
-    static mutex time_mutex;
-    lock_guard<mutex>locker(time_mutex);
     std::ostringstream stream;
     auto now = chrono::system_clock::now();
     time_t tt = chrono::system_clock::to_time_t(now);
-
 #if defined(WIN32) || defined(_WIN32)
     struct tm tm;
     localtime_s(&tm, &tt);
@@ -153,7 +148,8 @@ string AimyLogger::get_local_day()
 #elif  defined(__linux) || defined(__linux__)
     char buffer[200] = {0};
     std::string timeString;
-    std::strftime(buffer, 200, "%F", std::localtime(&tt));
+    auto timet=std::localtime(&tt);
+    std::strftime(buffer, 200, "%F", timet);
     stream << buffer;
 #endif
     return stream.str();

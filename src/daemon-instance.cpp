@@ -33,6 +33,8 @@ enum ConfigItemType:uint8_t
     CONFIG_LOG_FILE_SIZE_LIMIT_KB,
     CONFIG_LOG_TO_TERMINAL,
     CONFIG_STATUS_PRINT_INTERVAL_SEC,
+    CONFIG_MAX_ERROR_REBOOT_CNT,
+    CONFIG_ERROR_THRESHOLD,
     CONFIG_ITEM_TYPE_LENGTH,
 };
 
@@ -49,6 +51,8 @@ static const char*ConfigItemString[64]=
     "logFileSizeKBytesLimit",
     "logToTerminal",
     "statusPrintIntervalSec",
+    "maxErrorRebootCnt",
+    "rebootErrorThresholdMsec"
 };
 
 static std::map<std::string,ConfigItemType>&getConfigItemMap()
@@ -909,16 +913,16 @@ void DaemonSession::check()
             resetBootStatus();
             AIMY_WARNNING("%s exited",configName.c_str());
             auto time_diff=getTimetamp()-lastBootTime;
-            if(time_diff<ERROR_BOOT_THRESHOLD_MSEC)++errorBootCnt;
+            if(errorRebootThresholdMsec>0&&time_diff<errorRebootThresholdMsec)++errorBootCnt;
             else {
                 errorBootCnt=0;
             }
 
-            if(errorBootCnt>=MAX_ERROR_BOOT_CNT)
+            if(maxErrorRebootCnt>0&&errorBootCnt>=maxErrorRebootCnt)
             {
                 errorBootCnt=0;
                 status=DaemonSessionFatalError;
-                AIMY_ERROR("%s run fatal error [%ld %ld]",configName.c_str(),ERROR_BOOT_THRESHOLD_MSEC,MAX_ERROR_BOOT_CNT);
+                AIMY_ERROR("%s run fatal error [%ld %ld]",configName.c_str(),errorRebootThresholdMsec,maxErrorRebootCnt);
                 break;
             }
             if(autoRestart)
@@ -1029,6 +1033,10 @@ bool DaemonSession::loadConfig(const std::string&path)
                     if(!i.second.empty())restartIntervalMsec=std::stold(i.second);
                     if(restartIntervalMsec<1000)restartIntervalMsec=1000;
                     break;
+                case CONFIG_MAX_ERROR_REBOOT_CNT:
+                    if(!i.second.empty())maxErrorRebootCnt=std::stold(i.second);
+                case CONFIG_ERROR_THRESHOLD:
+                    if(!i.second.empty())errorRebootThresholdMsec=std::stold(i.second);
                 case CONFIG_ENV_PATH:
                     envPath=i.second;
                     break;
@@ -1098,8 +1106,8 @@ pid_t DaemonSession::exec()
                 if(!i.first.empty())::setenv(i.first.c_str(),i.second.c_str(),1);
             }
             if(!work_path.empty())chdir(work_path.c_str());
-            ::close(STDOUT_FILENO);
-            ::close(STDERR_FILENO);
+            ::close(STDOUT_FILENO);//todo redirect stdout
+            ::close(STDERR_FILENO);//todo redirect stderr
             //parser---
             if(type==DAEMON_SHELL_TYPE)
             {
@@ -1286,6 +1294,28 @@ bool DaemonSession::dumpConfig(const std::string&path)
             AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
             break;
         }
+        const static char *info_str7="//specify the miliseconds threshold for an fatal reboot,<=0 will be inactive";
+        if(fprintf(fp,"%s\n",info_str7)<=0)
+        {
+            AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
+            break;
+        }
+        if(fprintf(fp,"%s=%lld\n",ConfigItemString[CONFIG_ERROR_THRESHOLD],errorRebootThresholdMsec)<=0)
+        {
+            AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
+            break;
+        }
+        const static char *info_str8="//specify max fatal reboot cnts,<=0 will be inactive";
+        if(fprintf(fp,"%s\n",info_str8)<=0)
+        {
+            AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
+            break;
+        }
+        if(fprintf(fp,"%s=%lld\n",ConfigItemString[CONFIG_MAX_ERROR_REBOOT_CNT],maxErrorRebootCnt)<=0)
+        {
+            AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
+            break;
+        }
         ret=dumpEnv(envPath);
     }while(0);
     if(fp)fclose(fp);
@@ -1369,7 +1399,8 @@ std::pair<string, string> DaemonSession::getStatusString()
 }
 
 DaemonSession::DaemonSession():sessionType(DAEMON_PROCESS_TYPE),execCmd(""),autoStart(false),autoRestart(false)
-  ,startDelayMsec(0),restartIntervalMsec(1000),workPath(""),envPath(""),pid(0),status(DaemonSessionExited)
+  ,startDelayMsec(0),restartIntervalMsec(1000),workPath(""),envPath(""),maxErrorRebootCnt(0),
+    errorRebootThresholdMsec(0),pid(0),status(DaemonSessionExited)
   ,lastBootTime(0),nextBootTime(0),bootCnt(0),lastRebootCnt(0),errorBootCnt(0),configName("default")
 {
 

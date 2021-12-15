@@ -223,14 +223,6 @@ private:
 };
 struct DaemonSession
 {
-    /**
-     * @brief MAX_ERROR_BOOT_CNT 最大允许的错误启动次数
-     */
-    constexpr static int MAX_ERROR_BOOT_CNT=3;
-    /**
-     * @brief ERROR_BOOT_THRESHOLD_MSEC 错误启动判断阈值，当一个程序持续运行时间小于此值时判断为一次错误启动
-     */
-    constexpr static int64_t ERROR_BOOT_THRESHOLD_MSEC=30000;
     //read from config
     std::string sessionType;//任务类型 process or shellscript
     std::string execCmd;//执行命令
@@ -241,6 +233,8 @@ struct DaemonSession
     std::string workPath;//工作路径
     std::string envPath;//环境变量路径
     std::map<std::string,std::string>envMap;//环境变量表
+    int64_t maxErrorRebootCnt;//最大允许的错误启动次数
+    int64_t errorRebootThresholdMsec;//错误启动判断阈值，当一个程序持续运行时间小于此值时判断为一次错误启动
     //runtime param
     pid_t pid;//当前进程id
     DaemonSessionStatus status;//任务状态

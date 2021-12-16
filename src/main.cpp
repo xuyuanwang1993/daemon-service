@@ -62,6 +62,18 @@ void worker_test(char *argv[])
 
 int main(int argc ,char *argv[])
 {
+//    AimyLogger::Instance().register_handle();
+//    AimyLogger::Instance().set_log_to_std(true);
+//    DaemonFileHelper parser;
+//    parser.parser(argv[1]);
+//    parser.dump();
+//    auto config_map=parser.itemMap["program"].configMap;
+//    auto env_map=parser.splitEnvInput(config_map["environment"]);
+//    for(auto i:env_map)
+//    {
+//        AIMY_DEBUG("%s = %s",i.first.c_str(),i.second.c_str());
+//    }
+//    return 0;
     Daemon::handleCommandline(argc,argv);
     return 0;
 }

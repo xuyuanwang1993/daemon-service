@@ -4,6 +4,7 @@
 #include <dirent.h>
 #include<set>
 #include<chrono>
+#include<list>
 #define DAEMON_SERVICE_VERSION "1.0.0"
 #define DAEMON_CONFIG_FILE_EXAMPLE_NAME "daemonConfig.ini.default"
 #define DAEMON_SESSION_CONFIG_FILE_EXAMPLE_NAME "app.conf.default"
@@ -11,14 +12,15 @@
 #define DAEMON_LOCAL_SERVICE_NAME "/tmp/daemon-service.service"
 #define DAEMON_SHELL_TYPE "shellscript"
 #define DAEMON_PROCESS_TYPE "process"
+#define DAEMON_CONFIG_ITEM "daemon-config"
 using namespace aimy;
 Daemon *Daemon::m_workDaemon=nullptr;
-std::string Daemon::m_binName="daemon-test";
-std::string Daemon::m_workPath="/userdata/aimy/bootstraps";
+std::string Daemon::m_binName="supervisord";
+std::string Daemon::m_workPath="/userdata/aimy/bootstraps/daemon/conf.d";
 std::string Daemon::m_logPath="/userdata/aimy/logs/daemon";
 uint32_t Daemon::m_logFileSizeKBytesLimit=0;
-bool Daemon::m_logToTerminal=true;
-std::string Daemon::m_configFileName="/userdata/aimy/bootstraps/daemonConfig.ini";
+bool Daemon::m_logToTerminal=false;
+std::string Daemon::m_configFileName="/userdata/aimy/bootstraps/daemon/daemonConfig.ini";
 int Daemon::m_statusPrintIntervalSec=0;
 static const uint32_t max_path_size=108;
 enum ConfigItemType:uint8_t
@@ -26,9 +28,9 @@ enum ConfigItemType:uint8_t
     CONFIG_CMD=0,
     CONFIG_AUTO_START,
     CONFIG_AUTO_RESTART,
-    CONFIG_START_DELAY_MSEC,
-    CONFIG_RESTART_INTERVAL_MSEC,
-    CONFIG_ENV_PATH,
+    CONFIG_START_DELAY_SEC,
+    CONFIG_RESTART_INTERVAL_SEC,
+    CONFIG_ENV,
     CONFIG_WORK_PATH,
     CONFIG_LOG_PATH,
     CONFIG_LOG_FILE_SIZE_LIMIT_KB,
@@ -36,24 +38,27 @@ enum ConfigItemType:uint8_t
     CONFIG_STATUS_PRINT_INTERVAL_SEC,
     CONFIG_MAX_ERROR_REBOOT_CNT,
     CONFIG_ERROR_THRESHOLD,
+    CONFIG_EXEC_TYPE,
     CONFIG_ITEM_TYPE_LENGTH,
 };
 
 static const char*ConfigItemString[64]=
 {
-    "execCmd",
-    "autoStart",
-    "autoRestart",
-    "startDelayMsec",
-    "restartIntervalMsec",
-    "envPath",
-    "workPath",
+    "command",
+    "autostart",
+    "autorestart",
+    "startsecs",
+    "restartsecs",
+    "environment",
+    "directory",
     "logPath",
     "logFileSizeKBytesLimit",
     "logToTerminal",
     "statusPrintIntervalSec",
     "maxErrorRebootCnt",
-    "rebootErrorThresholdMsec"
+    "rebootErrorThresholdSec",
+    "exectype"
+
 };
 
 static std::map<std::string,ConfigItemType>&getConfigItemMap()
@@ -139,7 +144,7 @@ void Daemon::mainEventLoop()
                 AIMY_ERROR("daemon loop fata error[%s]",strerror(errno));
                 break;
             }
-            else if (ret<=max_path_size) {
+            else if (static_cast<uint32_t>(ret)<=max_path_size) {
                 continue;
             }
             else {
@@ -150,7 +155,7 @@ void Daemon::mainEventLoop()
                 std::string option2;
                 bool find_space=false;
                 uint32_t start_pos=max_path_size+1;
-                while(start_pos<ret)
+                while(start_pos<static_cast<uint32_t>(ret))
                 {
                     if(buf[start_pos]=='\0')break;
                     else if (buf[start_pos]==' ') {
@@ -160,7 +165,7 @@ void Daemon::mainEventLoop()
                     ++start_pos;
                 }
                 option1=std::string(buf+max_path_size,start_pos-max_path_size);
-                if(find_space&&start_pos+1<ret)option2=std::string(buf+start_pos+1,ret-start_pos-1);
+                if(find_space&&start_pos+1<static_cast<uint32_t>(ret))option2=std::string(buf+start_pos+1,ret-start_pos-1);
                 std::string ret=handleOption(option1,option2);
                 sock.send(ret.c_str(),ret.length(),source_path);
             }
@@ -279,66 +284,35 @@ bool Daemon::dumpConfig(const std::string &path)
             AIMY_ERROR("open %s failed[%s]",path.c_str(),strerror(errno));
             break;
         }
-        const static char *info_str="//this is a config file for daemon";
-        if(fprintf(fp,"%s\n",info_str)<=0)
-        {
-            AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
-            break;
-        }
-        const static char *config_str="<daemonConfig>";
-        if(fprintf(fp,"%s\n",config_str)<=0)
+        if(!DaemonFileHelper::appendItemTofile(DAEMON_CONFIG_ITEM,"","this is a config file for daemon",fp))
         {
             AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
             break;
         }
         //write config
-        const static char *info_str1="//specify workPath";
-        if(fprintf(fp,"%s\n",info_str1)<=0)
+        if(!DaemonFileHelper::appendKeyValueTofile(ConfigItemString[CONFIG_WORK_PATH],m_workPath,"specify workPath",fp))
         {
             AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
             break;
         }
-        if(fprintf(fp,"%s=%s\n",ConfigItemString[CONFIG_WORK_PATH],m_workPath.c_str())<=0)
+        if(!DaemonFileHelper::appendKeyValueTofile(ConfigItemString[CONFIG_LOG_PATH],m_logPath,"specify logPath",fp))
         {
             AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
             break;
         }
-        const static char *info_str2="//specify logPath";
-        if(fprintf(fp,"%s\n",info_str2)<=0)
-        {
-            AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
-        }
-        if(fprintf(fp,"%s=%s\n",ConfigItemString[CONFIG_LOG_PATH],m_logPath.c_str())<=0)
+        if(!DaemonFileHelper::appendKeyValueTofile(ConfigItemString[CONFIG_LOG_FILE_SIZE_LIMIT_KB],std::to_string(m_logFileSizeKBytesLimit),"limit log_file size kb range[32k-2G],<=0 means no limit",fp))
         {
             AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
             break;
         }
-        const static char *info_str3="//limit log_file size kb range[32k-2G],<=0 means no limit ";
-        if(fprintf(fp,"%s\n",info_str3)<=0)
-        {
-            AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
-        }
-        if(fprintf(fp,"%s=%u\n",ConfigItemString[CONFIG_LOG_FILE_SIZE_LIMIT_KB],m_logFileSizeKBytesLimit)<=0)
+        if(!DaemonFileHelper::appendKeyValueTofile(ConfigItemString[CONFIG_LOG_TO_TERMINAL],std::to_string(m_logToTerminal?1:0),
+                                                   "is set to 0 log will print to terminal otherwise not",fp))
         {
             AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
             break;
         }
-        const static char *info_str4="//is set to 0 log will print to terminal otherwise not";
-        if(fprintf(fp,"%s\n",info_str4)<=0)
-        {
-            AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
-        }
-        if(fprintf(fp,"%s=%d\n",ConfigItemString[CONFIG_LOG_TO_TERMINAL],m_logToTerminal)<=0)
-        {
-            AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
-            break;
-        }
-        const static char *info_str5="//daemon status print interval sec <=0 for not print ";
-        if(fprintf(fp,"%s\n",info_str5)<=0)
-        {
-            AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
-        }
-        if(fprintf(fp,"%s=%u\n",ConfigItemString[CONFIG_STATUS_PRINT_INTERVAL_SEC],m_statusPrintIntervalSec)<=0)
+        if(!DaemonFileHelper::appendKeyValueTofile(ConfigItemString[CONFIG_STATUS_PRINT_INTERVAL_SEC],std::to_string(m_statusPrintIntervalSec?1:0),
+                                                   "is set to 0 log will print to terminal otherwise not",fp))
         {
             AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
             break;
@@ -362,7 +336,7 @@ void Daemon::initDaemon()
         processInitLog("work-process",Daemon::m_logPath);
         AIMY_INFO("---------------start[%d]---------------",getppid());
         AIMY_INFO("compile_info:%s %s",__DATE__,__TIME__);
-        auto pgid=getpgrp();
+        //auto pgid=getpgrp();
         setsid();//分离进程组
         //killpg(pgid,SIGKILL);//关闭原进程组中所有进程
         umask(0);
@@ -410,14 +384,14 @@ void Daemon::generateTaskExampleConfig(const std::string&path)
     if(path.empty())save_path="./";
     DaemonSession session;
     session.envMap.emplace("aamDaemon",__DATE__);
+    session.envMap.emplace("aamDaemonDouble",__DATE__);
     session.dumpConfig(save_path+"/"+DAEMON_SESSION_CONFIG_FILE_EXAMPLE_NAME);
-    session.dumpEnv(save_path+"/"+DAEMON_ENV_CONFIG_FILE_EXAMPLE_NAME);
 }
 
 std::string Daemon::handleOption(const std::string &option1,const std::string &option2)
 {
     std::string ret="success";
-    if(option1=="exit")
+    if(option1=="shutdown")
     {
         AIMY_WARNNING("exit daemon service by external command!");
         ret="exit daemon_service!";
@@ -464,6 +438,15 @@ std::string Daemon::handleOption(const std::string &option1,const std::string &o
             ret=m_daemonWorker->reloadTask(option2);
         }
     }
+    else if (option1=="load") {
+        if(option2.empty())
+        {
+            ret="load option need a config file";
+        }
+        else {
+            ret=m_daemonWorker->loadPath(option2);
+        }
+    }
     else {
         ret=std::string("option ")+option1+" isn't supported!";
     }
@@ -482,19 +465,33 @@ void Daemon::handleCommandline(int argc ,char *argv[])
                                   "-g,--generate<target_path>\tgenerate default config file to target path\n"
                                   "ctl <option>[option ...]\tother control options\n"
                                   "\n----------ctl-options--------\n"
-                                  "exit\texit daemon service\n"
+                                  "shutdown\texit daemon service\n"
                                   "status\tprint daemon status\n"
                                   "start<taskName>\tstart a task\n"
                                   "stop<taskName>\tstop a task\n"
                                   "restart<taskName>\trestart a task\n"
                                   "reload<taskName>\treload a task from the workpath's config file\n"
+                                  "load<configfilePath>\tload a new task from the config file\n"
                                   "\n---------config-info--------\n"
                                   "${work_path}/.dameon-service.ini specify daemon-serivce's base config\n"
                                   "${work_path}/appName.conf define a task whose's taskName is \"appName\"\n"
                                   "you can specify app's runtime environment variables with a *.env file\n";
+    //get bin name
+    std::string cache=argv[0];
+    auto pos=cache.find_last_of('/');
+    //
+    std::string binToolName;
+    if(pos!=std::string::npos)
+    {
+        binToolName=cache.substr(pos+1);
+    }
+    else {
+        binToolName=cache;
+    }
+    m_binName=binToolName;
     if(argc<=1)
     {
-        printf("%s",helpInfo);
+        Daemon::initDaemon();
     }
     else {
         std::string main_option=argv[1];
@@ -511,19 +508,6 @@ void Daemon::handleCommandline(int argc ,char *argv[])
             memset(real_path,0,1024);
             realpath(argv[next_argv_read_pos],real_path);
             m_configFileName=real_path;
-            //get bin name
-            std::string cache=argv[0];
-            auto pos=cache.find_last_of('/');
-            //
-            std::string binToolName;
-            if(pos!=std::string::npos)
-            {
-                binToolName=cache.substr(pos+1);
-            }
-            else {
-                binToolName=cache;
-            }
-            m_binName=binToolName;
             Daemon::initDaemon();
         }
         else if (main_option=="ctl") {
@@ -604,14 +588,21 @@ void Daemon::loadConfig()
             AIMY_ERROR("configFileName is empty!");
             break;
         }
-        DaemonFileParser parser;
+        DaemonFileHelper parser;
         auto ret=parser.parser(m_configFileName);
         if(!ret)
         {
             AIMY_ERROR("%s load[%s] failed!",__func__,m_configFileName.c_str());
             break;
         }
-        auto items_map=parser.configMap;
+        std::string item_name=DAEMON_CONFIG_ITEM;
+        auto iter=parser.itemMap.find(item_name);
+        if(iter==parser.itemMap.end())
+        {
+            AIMY_ERROR("%s load[%s] failed!",__func__,item_name.c_str());
+            break;
+        }
+        auto items_map=iter->second.configMap;
         auto &config_map=getConfigItemMap();
         for(auto i:items_map)
         {
@@ -702,7 +693,7 @@ std::string DaemonWorker::reloadTask(const std::string &TaskName)
         m_tasksMap.erase(iter);
     }
     std::shared_ptr<DaemonSession>session(new DaemonSession);
-    bool ret=session->loadConfig(m_configPath+"/"+TaskName+".conf");
+    bool ret=session->loadConfig(session->configFilePath);
     if(ret)
     {
         m_tasksMap.emplace(TaskName,session);
@@ -712,6 +703,25 @@ std::string DaemonWorker::reloadTask(const std::string &TaskName)
     else {
         return std::string("load ")+TaskName+" failed";
     }
+}
+
+std::string DaemonWorker::loadPath(const std::string&configPath)
+{
+    std::shared_ptr<DaemonSession>session(new DaemonSession);
+    bool ret=session->loadConfig(configPath);
+    std::string taskname=session->configName;
+    if(ret)
+    {
+        auto iter=m_tasksMap.find(taskname);
+        if(iter==m_tasksMap.end())
+        {
+            m_tasksMap.emplace(taskname,session);
+            m_cv.notify_one();
+            return std::string("load ")+taskname+" success";
+        }
+
+    }
+    return std::string("load ")+taskname+" failed";
 }
 
 std::string DaemonWorker::restartTask(const std::string &TaskName)
@@ -914,7 +924,7 @@ void DaemonSession::check()
             resetBootStatus();
             AIMY_WARNNING("%s exited",configName.c_str());
             auto time_diff=getTimetamp()-lastBootTime;
-            if(errorRebootThresholdMsec>0&&time_diff<errorRebootThresholdMsec)++errorBootCnt;
+            if(errorRebootThresholdSec>0&&time_diff<errorRebootThresholdSec)++errorBootCnt;
             else {
                 errorBootCnt=0;
             }
@@ -923,14 +933,14 @@ void DaemonSession::check()
             {
                 errorBootCnt=0;
                 status=DaemonSessionFatalError;
-                AIMY_ERROR("%s run fatal error [%ld %ld]",configName.c_str(),errorRebootThresholdMsec,maxErrorRebootCnt);
+                AIMY_ERROR("%s run fatal error [%ld %ld]",configName.c_str(),errorRebootThresholdSec,maxErrorRebootCnt);
                 break;
             }
             if(autoRestart)
             {
                 AIMY_WARNNING("%s wait restart",configName.c_str());
                 status=DaemonSessionWaitStarted;
-                nextBootTime=getTimetamp()+restartIntervalMsec;
+                nextBootTime=getTimetamp()+restartIntervalSec;
             }
         }
     }while(0);
@@ -946,7 +956,7 @@ void DaemonSession::check()
             if(new_pid<=0)
             {
                 AIMY_DEBUG("start %s failed,wait next turn!",configName.c_str());
-                nextBootTime=now_time+restartIntervalMsec;
+                nextBootTime=now_time+restartIntervalSec;
             }
             else {
                 AIMY_DEBUG("start %s success->pid[%d]!",configName.c_str(),new_pid);
@@ -959,6 +969,7 @@ void DaemonSession::check()
 
 bool DaemonSession::loadConfig(const std::string&path)
 {//*.conf
+    configFilePath=path;
     bool ret=false;
     do{
         if(path.empty())
@@ -966,50 +977,23 @@ bool DaemonSession::loadConfig(const std::string&path)
             AIMY_ERROR("%s invalid param!",__func__);
             break;
         }
-        //read suffix
-        auto pos1=path.find_last_of('.');
-        std::string suffix;
-        if(pos1!=std::string::npos)
-        {
-            suffix=path.substr(pos1+1);
-        }
-        static const char *config_suffix="conf";
-        if(suffix!=config_suffix)
-        {
-            AIMY_ERROR("%s false config file suffix",path.c_str());
-            break;
-        }
-        auto pos2=path.find_last_of('/',pos1-1);
-        if(pos2!=std::string::npos)
-        {
-            configName=path.substr(pos2+1,pos1-pos2-1);
-        }
-        else {
-            configName=path.substr(0,pos1);
-        }
-        if(configName.empty())
-        {
-            AIMY_ERROR("%s false config file name",path.c_str());
-            break;
-        }
-        DaemonFileParser parser;
+        DaemonFileHelper parser;
         ret=parser.parser(path);
         if(!ret)
         {
             AIMY_ERROR("%s load[%s] failed!",__func__,path.c_str());
             break;
         }
-        auto type=parser.itemName;
-        int len=128;
-        char description[len];
-        memset(description,0,len);
-        char type_str[len];
-        memset(type_str,0,len);
-        if(sscanf(type.c_str(),"%[^=]=%s",type_str,description)==2)
+        parser.dump();
+        std::string item_name="program";
+        auto iter=parser.itemMap.find(item_name);
+        if(iter==parser.itemMap.end()||iter->second.description.empty())
         {
-            sessionType=description;
+            AIMY_ERROR("%s load[%s:%s] failed!",__func__,item_name.c_str());
+            break;
         }
-        auto items_map=parser.configMap;
+        configName=iter->second.description;
+        auto items_map=iter->second.configMap;
         auto &config_map=getConfigItemMap();
         for(auto i:items_map)
         {
@@ -1021,29 +1005,40 @@ bool DaemonSession::loadConfig(const std::string&path)
                     execCmd=i.second;
                     break;
                 case CONFIG_AUTO_START:
-                    if(!i.second.empty())autoStart=std::stoi(i.second)!=0;
+                    if(!i.second.empty())autoStart=i.second=="true";
                     break;
                 case CONFIG_AUTO_RESTART:
-                    if(!i.second.empty())autoRestart=std::stoi(i.second)!=0;
+                    if(!i.second.empty())autoRestart=i.second=="true";
                     break;
-                case CONFIG_START_DELAY_MSEC:
-                    if(!i.second.empty())startDelayMsec=std::stold(i.second);
-                    if(startDelayMsec<0)startDelayMsec=0;
+                case CONFIG_START_DELAY_SEC:
+                    if(!i.second.empty())startDelaySec=std::stold(i.second);
+                    if(startDelaySec<0)startDelaySec=0;
                     break;
-                case CONFIG_RESTART_INTERVAL_MSEC:
-                    if(!i.second.empty())restartIntervalMsec=std::stold(i.second);
-                    if(restartIntervalMsec<1000)restartIntervalMsec=1000;
+                case CONFIG_RESTART_INTERVAL_SEC:
+                    if(!i.second.empty())restartIntervalSec=std::stold(i.second);
+                    if(restartIntervalSec<1)restartIntervalSec=1;
                     break;
                 case CONFIG_MAX_ERROR_REBOOT_CNT:
                     if(!i.second.empty())maxErrorRebootCnt=std::stold(i.second);
+                    break;
                 case CONFIG_ERROR_THRESHOLD:
-                    if(!i.second.empty())errorRebootThresholdMsec=std::stold(i.second);
-                case CONFIG_ENV_PATH:
-                    envPath=i.second;
+                    if(!i.second.empty())errorRebootThresholdSec=std::stold(i.second);
+                    break;
+                case CONFIG_ENV:
+                    env=i.second;
+                    envMap=parser.splitEnvInput(env);
                     break;
                 case CONFIG_WORK_PATH:
                     workPath=i.second;
                     break;
+                case CONFIG_EXEC_TYPE:
+                    sessionType=i.second;
+                    if(sessionType!=DAEMON_PROCESS_TYPE&&sessionType!=DAEMON_SHELL_TYPE)
+                    {
+                        sessionType=DAEMON_PROCESS_TYPE;
+                    }
+                    break;
+
                 default:
                     AIMY_WARNNING("%s=%s not supported!",i.first.c_str(),i.second.c_str());
                     break;
@@ -1054,21 +1049,10 @@ bool DaemonSession::loadConfig(const std::string&path)
             }
         }
 
-        if(!envPath.empty())
-        {
-            ret=parser.parser(envPath);
-            if(!ret)
-            {
-                AIMY_ERROR("%s load[%s] failed!",__func__,envPath.c_str());
-                break;
-            }
-            envMap=parser.configMap;
-        }
-
         if(autoStart)
         {
             status=DaemonSessionWaitStarted;
-            nextBootTime=getTimetamp()+startDelayMsec;
+            nextBootTime=getTimetamp()+startDelaySec;
         }
         AIMY_INFO("load app_config:%s success!",path.c_str());
         ret=true;
@@ -1177,7 +1161,7 @@ int64_t DaemonSession::getTimetamp()
 {
     timeval now;
     gettimeofday(&now,nullptr);
-    return static_cast<int64_t>(static_cast<int64_t>(now.tv_sec)*1000L+static_cast<int64_t>(now.tv_usec)/1000L);
+    return static_cast<int64_t>(now.tv_sec);
 }
 
 void DaemonSession::resetBootStatus()
@@ -1211,162 +1195,82 @@ bool DaemonSession::dumpConfig(const std::string&path)
             AIMY_ERROR("open %s failed[%s]",path.c_str(),strerror(errno));
             break;
         }
-        const static char *info_str="//this is a config file for daemon session,a valid session's config must end with \".conf\"\n"
-                "//config support two exec type: \"process\" for normal program,\"shellscript\" for shell script";
-        if(fprintf(fp,"%s\n",info_str)<=0)
+        const static char *info_str="this is a config file for daemon session,a valid session's config must end with \".conf\"\n"
+                                    "#config support two exec type: \"process\" for normal program,\"shellscript\" for shell script";
+        if(!DaemonFileHelper::appendItemTofile("program",configName,info_str,fp))
         {
             AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
             break;
         }
-        if(fprintf(fp,"<config=%s>\n",sessionType.c_str())<=0)
+        if(!DaemonFileHelper::appendKeyValueTofile(ConfigItemString[CONFIG_CMD],execCmd,"exec command",fp))
         {
             AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
             break;
         }
-        //write config
-        if(fprintf(fp,"%s=%s\n",ConfigItemString[CONFIG_CMD],execCmd.c_str())<=0)
+        if(!DaemonFileHelper::appendKeyValueTofile(ConfigItemString[CONFIG_EXEC_TYPE],sessionType,"exec type[shellscript/process]",fp))
         {
             AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
             break;
         }
-        const static char *info_str1="//if it's set to no zero value,it will be start after default loading";
-        if(fprintf(fp,"%s\n",info_str1)<=0)
+        if(!DaemonFileHelper::appendKeyValueTofile(ConfigItemString[CONFIG_AUTO_START],autoStart?"true":"false",
+                                                   "if it's set to no zero value,it will be start after default loading",fp))
         {
             AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
             break;
         }
-        if(fprintf(fp,"%s=%d\n",ConfigItemString[CONFIG_AUTO_START],autoStart)<=0)
+        if(!DaemonFileHelper::appendKeyValueTofile(ConfigItemString[CONFIG_AUTO_RESTART],autoRestart?"true":"false",
+                                                   "if it's set to no zero value,it will be restart after the task is done",fp))
         {
             AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
             break;
         }
-        const static char *info_str2="//if it's set to no zero value,it will be restart after the task is done";
-        if(fprintf(fp,"%s\n",info_str2)<=0)
+        if(!DaemonFileHelper::appendKeyValueTofile(ConfigItemString[CONFIG_START_DELAY_SEC],std::to_string(startDelaySec),
+                                                   "specify the default start delay seconds",fp))
         {
             AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
             break;
         }
-        if(fprintf(fp,"%s=%d\n",ConfigItemString[CONFIG_AUTO_RESTART],autoRestart)<=0)
+        if(!DaemonFileHelper::appendKeyValueTofile(ConfigItemString[CONFIG_RESTART_INTERVAL_SEC],std::to_string(restartIntervalSec),
+                                                   "specify the restart delay seconds",fp))
         {
             AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
             break;
         }
-        const static char *info_str3="//specify the default start delay mlillseconds";
-        if(fprintf(fp,"%s\n",info_str3)<=0)
+        if(!DaemonFileHelper::appendKeyValueTofile(ConfigItemString[CONFIG_WORK_PATH],workPath,
+                                                   "specify the work path",fp))
         {
             AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
             break;
         }
-        if(fprintf(fp,"%s=%lld\n",ConfigItemString[CONFIG_START_DELAY_MSEC],startDelayMsec)<=0)
+        if(!DaemonFileHelper::appendKeyValueTofile(ConfigItemString[CONFIG_ERROR_THRESHOLD],std::to_string(errorRebootThresholdSec),
+                                                   "specify the seconds threshold for an fatal reboot,<=0 will be inactive",fp))
         {
             AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
             break;
         }
-        const static char *info_str4="//specify the restart delay mlillseconds";
-        if(fprintf(fp,"%s\n",info_str4)<=0)
+        if(!DaemonFileHelper::appendKeyValueTofile(ConfigItemString[CONFIG_MAX_ERROR_REBOOT_CNT],std::to_string(maxErrorRebootCnt),
+                                                   "specify max fatal reboot cnts,<=0 will be inactive",fp))
         {
             AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
             break;
         }
-        if(fprintf(fp,"%s=%lld\n",ConfigItemString[CONFIG_RESTART_INTERVAL_MSEC],restartIntervalMsec)<=0)
+        std::list<std::string>envlist;
+        for(auto &i:envMap)
+        {
+            envlist.push_back(i.first+"="+i.second);
+        }
+        if(!DaemonFileHelper::appendKeyValuelistTofile(ConfigItemString[CONFIG_ENV],envlist,
+                                                   "specify the environment",fp))
         {
             AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
             break;
         }
-        const static char *info_str5="//specify the environment file";
-        if(fprintf(fp,"%s\n",info_str5)<=0)
-        {
-            AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
-            break;
-        }
-        if(fprintf(fp,"%s=%s\n",ConfigItemString[CONFIG_ENV_PATH],envPath.c_str())<=0)
-        {
-            AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
-            break;
-        }
-        const static char *info_str6="//specify the work path";
-        if(fprintf(fp,"%s\n",info_str6)<=0)
-        {
-            AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
-            break;
-        }
-        if(fprintf(fp,"%s=%s\n",ConfigItemString[CONFIG_WORK_PATH],workPath.c_str())<=0)
-        {
-            AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
-            break;
-        }
-        const static char *info_str7="//specify the miliseconds threshold for an fatal reboot,<=0 will be inactive";
-        if(fprintf(fp,"%s\n",info_str7)<=0)
-        {
-            AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
-            break;
-        }
-        if(fprintf(fp,"%s=%lld\n",ConfigItemString[CONFIG_ERROR_THRESHOLD],errorRebootThresholdMsec)<=0)
-        {
-            AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
-            break;
-        }
-        const static char *info_str8="//specify max fatal reboot cnts,<=0 will be inactive";
-        if(fprintf(fp,"%s\n",info_str8)<=0)
-        {
-            AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
-            break;
-        }
-        if(fprintf(fp,"%s=%lld\n",ConfigItemString[CONFIG_MAX_ERROR_REBOOT_CNT],maxErrorRebootCnt)<=0)
-        {
-            AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
-            break;
-        }
-        ret=dumpEnv(envPath);
-    }while(0);
-    if(fp)fclose(fp);
-    return ret;
-}
-
-bool DaemonSession::dumpEnv(const std::string&path)
-{
-    bool ret=false;
-    FILE *fp=nullptr;
-    do{
-        if(path.empty())
-        {
-            AIMY_ERROR("%s invalid param",__func__);
-            break;
-        }
-        fp=fopen(path.c_str(),"w+");
-        if(!fp)
-        {
-            AIMY_ERROR("open %s failed[%s]",path.c_str(),strerror(errno));
-            break;
-        }
-        const static char *info_str="//this is a environment config file";
-        if(fprintf(fp,"%s\n",info_str)<=0)
-        {
-            AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
-            break;
-        }
-        const static char *env_str="<env>";
-        if(fprintf(fp,"%s\n",env_str)<=0)
-        {
-            AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
-            break;
-        }
-        bool failed=false;
-        for(auto i:envMap)
-        {
-            if(fprintf(fp,"%s=%s\n",i.first.c_str(),i.second.c_str())<=0)
-            {
-                failed=true;
-                AIMY_ERROR("write %s failed[%s]",path.c_str(),strerror(errno));
-                break;
-            }
-        }
-        if(failed)break;
         ret=true;
     }while(0);
     if(fp)fclose(fp);
     return ret;
 }
+
 
 std::pair<string, string> DaemonSession::getStatusString()
 {
@@ -1386,7 +1290,7 @@ std::pair<string, string> DaemonSession::getStatusString()
         }
         return "undefined";
     };
-    time_t tt=lastBootTime/1000;
+    time_t tt=lastBootTime;
     struct tm *t = localtime(&tt);
     char dateBuf[128];
     snprintf(dateBuf, sizeof(dateBuf), "%04d-%02d-%02d %02d:%02d:%02d", t->tm_year+1900,
@@ -1399,10 +1303,10 @@ std::pair<string, string> DaemonSession::getStatusString()
     return std::make_pair(std::string(head_str),std::string(buf));
 }
 
-DaemonSession::DaemonSession():sessionType(DAEMON_PROCESS_TYPE),execCmd(""),autoStart(false),autoRestart(false)
-  ,startDelayMsec(0),restartIntervalMsec(1000),workPath(""),envPath(""),maxErrorRebootCnt(0),
-    errorRebootThresholdMsec(0),pid(0),status(DaemonSessionExited)
-  ,lastBootTime(0),nextBootTime(0),bootCnt(0),lastRebootCnt(0),errorBootCnt(0),configName("default")
+DaemonSession::DaemonSession():sessionType(DAEMON_PROCESS_TYPE),execCmd(""),autoStart(false),autoRestart(true)
+  ,startDelaySec(0),restartIntervalSec(5),workPath(""),env(""),maxErrorRebootCnt(0),
+    errorRebootThresholdSec(0),pid(0),status(DaemonSessionExited)
+  ,lastBootTime(0),nextBootTime(0),bootCnt(0),lastRebootCnt(0),errorBootCnt(0),configName("default"),configFilePath("")
 {
 
 }
@@ -1412,15 +1316,16 @@ DaemonSession::~DaemonSession()
     releaseProcess();
 }
 
-DaemonFileParser::DaemonFileParser():filePath(""),itemName("")
+DaemonFileHelper::DaemonFileHelper():filePath("")
 {
 
 }
 
-bool DaemonFileParser::parser(const std::string &filePath)
+bool DaemonFileHelper::parser(const std::string &filePath)
 {
-    bool ret=false;
     FILE *fp=nullptr;
+    itemMap.clear();
+    this->filePath=filePath;
     do{
         if(filePath.empty())
         {
@@ -1433,70 +1338,317 @@ bool DaemonFileParser::parser(const std::string &filePath)
             AIMY_ERROR("open file:%s failed[%s]",filePath.c_str(),strerror(errno));
             break;
         }
-        std::string context;
-        char buf[1024];
+        char *buf=nullptr;
+        size_t len=0;
+        ssize_t nread=-1;
+        uint32_t value_buf_len=128*1024;
+        std::shared_ptr<char>value_buf(new char[value_buf_len+1],std::default_delete<char[]>());
+        DaemonConfigInfo info;
+        std::string data_cache;
         while(feof(fp)==0)
         {
-            memset(buf,0,1024);
-            auto read_len=fread(buf,1,1024,fp);
-            if(read_len<=0)
+            nread = getline(&buf, &len, fp);
+            if(nread<=0||!buf)
             {
-                AIMY_ERROR("read file:%s error[%s]",filePath.c_str(),strerror(errno));
-                break;
+                continue;
             }
-            context+=std::string(buf,read_len);
-        }
-        AIMY_DEBUG("read %s finished",filePath.c_str());
-        if(context.length()==0)
-        {
-            AIMY_ERROR("file[%s] is empty or read error!",filePath.c_str());
-            break;
-        }
-        AIMY_DEBUG("parser file[%s] len[%d] context->%s",filePath.c_str(),context.length(),context.c_str());
-        //find itemName   <itemName>
-        auto pos1=context.find_first_of('<');
-        auto pos2=context.find_first_of('>');
-        if(pos1==std::string::npos||pos2==std::string::npos||pos2<=pos1)
-        {
-            AIMY_ERROR("file[%s] parse error->need a itemName!",filePath.c_str());
-            break;
-        }
-        this->filePath=filePath;
-        itemName=context.substr(pos1+1,pos2-pos1-1);
-        configMap.clear();
-        AIMY_INFO("parse[%s] itemName:%s",filePath.c_str(),itemName.c_str());
-        const char *read_ptr=context.c_str();
-        auto new_pos=context.find_first_of('\n',pos2+1);
-        if(new_pos==std::string::npos)new_pos=context.length()-1;
-        size_t offset=new_pos+1;
-        while(offset<context.length())
-        {
-            size_t next_pos=offset+1;
-            while(next_pos<context.length()&&read_ptr[next_pos]!='\n')++next_pos;
-            //使用“//”做注释
-            if(next_pos-offset>=2&&(read_ptr[offset]!='/'||read_ptr[offset+1]!='/'))
-            {//a=b  min  2 bytes
-                char key[256]={0};
-                char value[2048]={0};
-                memset(key,0,256);
-                memset(value,0,2048);
-                int ret=0;
-                if((ret=sscanf(read_ptr+offset,"%[^=]=%[^\r\n]",key,value))<=0)
+            auto data=trim(std::string(buf,nread));
+            free(buf);
+            buf=nullptr;
+
+            //使用'#'做注释
+            if(data[0]=='#'||data.empty())continue;
+            if(data[0]=='[')
+            {
+                //handle cache
+                if(data_cache.size()>=2)
                 {
-                    AIMY_WARNNING("file[%s] parse error->false format offset[%lu]!",filePath.c_str(),offset);
-                }
-                else {
-                    if(ret==2)configMap.emplace(key,value);
+                    memset(value_buf.get(),0,value_buf_len+1);
+                    char key[256]={0};
+                    memset(key,0,256);
+                    int ret=0;
+                    if((ret=sscanf(data_cache.c_str(),"%[^=]=%[^\r\n]",key,value_buf.get()))!=2)
+                    {
+                        ret=sscanf(data_cache.c_str(),"%[^:]:%[^\r\n]",key,value_buf.get());
+                    }
+                    if(ret==2)info.configMap.emplace(trim(std::string(key)),trim(std::string(value_buf.get())));
                     else {
-                        configMap.emplace(key,std::string());
+
+                        if((*data_cache.rbegin()==':')||(*data_cache.rbegin()=='='))
+                        {
+                            info.configMap.emplace(trim(data_cache.substr(0,data_cache.size()-1)),std::string());
+                        }
+                        else {
+                            AIMY_WARNNING("file[%s] parse error->false format data[%s]!",filePath.c_str(),data_cache.c_str());
+                        }
+                    }
+                    data_cache.clear();
+                }
+                if(!info.fieldName.empty()&&!info.configMap.empty())
+                {
+                    itemMap.emplace(trim(info.fieldName),info);
+                    info.clear();
+                }
+                if(*data.rbegin()!=']'||data.size()<3)continue;
+                int len=128;
+                char description[len];
+                memset(description,0,len);
+                char type_str[len];
+                memset(type_str,0,len);
+                if(sscanf(data.c_str()+1,"%[^:]:%[^]]]",type_str,description)==2)
+                {
+                    info.fieldName=trim(type_str);
+                    info.description=trim(description);
+                }
+                else{
+                    info.fieldName=data.substr(1,data.size()-2);
+                }
+                AIMY_INFO("parse[%s] itemName:%s",filePath.c_str(),info.fieldName.c_str());
+            }
+            else {
+                bool need_append=(*data.rbegin())=='\\';
+                if(need_append)data_cache+=data.substr(0,data.size()-1);
+                else {
+                    data_cache+=data;
+                    //handle cache
+                    if(data_cache.size()>=2)
+                    {
+                        memset(value_buf.get(),0,value_buf_len+1);
+                        char key[256]={0};
+                        memset(key,0,256);
+                        int ret=0;
+                        if((ret=sscanf(data_cache.c_str(),"%[^=]=%[^\r\n]",key,value_buf.get()))!=2)
+                        {
+                            ret=sscanf(data_cache.c_str(),"%[^:]:%[^\r\n]",key,value_buf.get());
+                        }
+                        if(ret==2)info.configMap.emplace(trim(std::string(key)),trim(std::string(value_buf.get())));
+                        else {
+
+                            if((*data_cache.rbegin()==':')||(*data_cache.rbegin()=='='))
+                            {
+                                info.configMap.emplace(trim(data_cache.substr(0,data_cache.size()-1)),std::string());
+                            }
+                            else {
+                                AIMY_WARNNING("file[%s] parse error->false format data[%s]!",filePath.c_str(),data_cache.c_str());
+                            }
+                        }
+                        data_cache.clear();
                     }
                 }
             }
+        }
+        //handle cache
+        if(data_cache.size()>=2)
+        {
+            memset(value_buf.get(),0,value_buf_len+1);
+            char key[256]={0};
+            memset(key,0,256);
+            int ret=0;
+            if((ret=sscanf(data_cache.c_str(),"%[^=]=%[^\r\n]",key,value_buf.get()))!=2)
+            {
+                ret=sscanf(data_cache.c_str(),"%[^:]:%[^\r\n]",key,value_buf.get());
+            }
+            if(ret==2)info.configMap.emplace(trim(std::string(key)),trim(std::string(value_buf.get())));
+            else {
 
-            offset=next_pos+1;
+                if((*data_cache.rbegin()==':')||(*data_cache.rbegin()=='='))
+                {
+                    info.configMap.emplace(trim(data_cache.substr(0,data_cache.size()-1)),std::string());
+                }
+                else {
+                    AIMY_WARNNING("file[%s] parse error->false format data[%s]!",filePath.c_str(),data_cache.c_str());
+                }
+            }
+            data_cache.clear();
+        }
+        if(!info.fieldName.empty()&&!info.configMap.empty())
+        {
+            itemMap.emplace(trim(info.fieldName),info);
+            info.clear();
+        }
+        AIMY_DEBUG("read %s finished",filePath.c_str());
+    }while(0);
+    if(fp)fclose(fp);
+    return !itemMap.empty();
+}
+
+void DaemonFileHelper::dump()
+{
+    AIMY_DEBUG("%s",filePath.c_str());
+    for(auto i:itemMap)
+    {
+        AIMY_WARNNING("item:%s %s %lu",i.first.c_str(),i.second.description.c_str(),i.second.configMap.size());
+        for(auto j:i.second.configMap)
+        {
+            AIMY_DEBUG("%s=%s",j.first.c_str(),j.second.c_str());
+        }
+    }
+}
+
+std::string DaemonFileHelper::trim(const std::string&src)
+{
+    if(src.empty())return src;
+    uint32_t begin_pos=0;
+    uint32_t end_pos=src.size()-1;
+    while(begin_pos<=end_pos)
+    {
+        if(isTrimCharacter(src[begin_pos]))++begin_pos;
+        else {
+            break;
+        }
+    }
+    while(end_pos>=begin_pos)
+    {
+        if(isTrimCharacter(src[end_pos]))--end_pos;
+        else {
+            break;
+        }
+    }
+    if(begin_pos>end_pos)return std::string();
+    return src.substr(begin_pos,end_pos-begin_pos+1);
+}
+
+bool DaemonFileHelper::isTrimCharacter(char c)
+{
+    return c==' '||c=='\t'||c=='\r'||c=='\n';
+}
+
+std::map<std::string,std::string> DaemonFileHelper::splitEnvInput(const std::string&src,char split_char)
+{
+    std::map<std::string,std::string>ret;
+    std::list<std::string>cache;
+    cache.push_back(std::string());
+    for(uint32_t i=0;i<src.length();++i)
+    {
+        char opt_char=src[i];
+        if(opt_char==split_char)
+        {
+            cache.push_back(std::string());
+        }
+        else {
+            cache.rbegin()->push_back(opt_char);
+        }
+    }
+    char key[512];
+    char value[2048];
+    for(auto & i:cache)
+    {
+        if(i.empty())continue;
+        memset(key,0,512);
+        memset(value,0,512);
+        if(sscanf(i.c_str(),"%[^=]=%[^\r\n]",key,value)!=2)continue;
+        ret.emplace(trim(std::string(key)),trim(std::string(value)));
+    }
+    return ret;
+}
+bool DaemonFileHelper::appendItemTofile(const std::string &item_name,const std::string &descritopn,const std::string &comment,FILE *fp)
+{
+    bool ret=false;
+    do{
+        if(item_name.empty()||!fp)break;
+        if(!comment.empty())
+        {
+            if(fprintf(fp,"#%s\r\n",comment.c_str())<=0)
+            {
+                AIMY_ERROR("write failed[%s]",strerror(errno));
+                break;
+            }
+        }
+        if(descritopn.empty())
+        {
+            if(fprintf(fp,"[%s]\r\n",item_name.c_str())<=0)
+            {
+                AIMY_ERROR("write failed[%s]",strerror(errno));
+                break;
+            }
+        }
+        else {
+            if(fprintf(fp,"[%s:%s]\r\n",item_name.c_str(),descritopn.c_str())<=0)
+            {
+                AIMY_ERROR("write failed[%s]",strerror(errno));
+                break;
+            }
         }
         ret=true;
     }while(0);
-    if(fp)fclose(fp);
+    return ret;
+}
+
+bool DaemonFileHelper::appendKeyValueTofile(const std::string &key, const std::string &value, const std::string &comment, FILE *fp)
+{
+    bool ret=false;
+    do{
+        if(key.empty()||!fp)break;
+        if(!comment.empty())
+        {
+            if(fprintf(fp,"#%s\r\n",comment.c_str())<=0)
+            {
+                AIMY_ERROR("write failed[%s]",strerror(errno));
+                break;
+            }
+        }
+        if(value.empty())
+        {
+            if(fprintf(fp,"%s=\r\n",key.c_str())<=0)
+            {
+                AIMY_ERROR("write failed[%s]",strerror(errno));
+                break;
+            }
+        }
+        else {
+            if(fprintf(fp,"%s=%s\r\n",key.c_str(),value.c_str())<=0)
+            {
+                AIMY_ERROR("write failed[%s]",strerror(errno));
+                break;
+            }
+        }
+        ret=true;
+    }while(0);
+    return ret;
+}
+
+bool DaemonFileHelper::appendKeyValuelistTofile(const std::string &key, std::list<std::string>valueList, const std::string &comment, FILE *fp)
+{
+    bool ret=false;
+    do{
+        if(key.empty()||!fp)break;
+        if(!comment.empty())
+        {
+            if(fprintf(fp,"#%s\r\n",comment.c_str())<=0)
+            {
+                AIMY_ERROR("write failed[%s]",strerror(errno));
+                break;
+            }
+        }
+        if(valueList.empty())
+        {
+            if(fprintf(fp,"%s=\r\n",key.c_str())<=0)
+            {
+                AIMY_ERROR("write failed[%s]",strerror(errno));
+                break;
+            }
+        }
+        else {
+            auto iter=valueList.begin();
+            if(fprintf(fp,"%s=%s,\\\r\n",key.c_str(),iter->c_str())<=0)
+            {
+                AIMY_ERROR("write failed[%s]",strerror(errno));
+                break;
+            }
+            bool failed=false;
+            ++iter;
+            for(;iter!=valueList.end();++iter)
+            {
+                if(fprintf(fp,"%s,\\\r\n",iter->c_str())<=0)
+                {
+                    AIMY_ERROR("write failed[%s]",strerror(errno));
+                    failed=true;
+                    break;
+                }
+            }
+            if(failed)break;
+        }
+        ret=true;
+    }while(0);
     return ret;
 }

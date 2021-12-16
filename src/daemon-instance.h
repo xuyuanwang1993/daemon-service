@@ -15,6 +15,7 @@
 #include<atomic>
 #include<condition_variable>
 #include<regex>
+#include<list>
 #include"network-log.h"
 namespace aimy {
 enum DaemonSessionStatus:uint8_t
@@ -187,6 +188,10 @@ public:
      */
     std::string startTask(const std::string&TaskName);
     /**
+     *  从配置文件中载入某个任务
+     */
+    std::string loadPath(const std::string&configPath);
+    /**
      * @brief getStatus 获取状态
      */
     std::string getStatus();
@@ -228,13 +233,13 @@ struct DaemonSession
     std::string execCmd;//执行命令
     bool autoStart;//自动启动
     bool autoRestart;//自动重新启动
-    int64_t startDelayMsec;//初始启动延时
-    int64_t restartIntervalMsec;//重新启动间隔
+    int64_t startDelaySec;//初始启动延时
+    int64_t restartIntervalSec;//重新启动间隔
     std::string workPath;//工作路径
-    std::string envPath;//环境变量路径
+    std::string env;//环境变量路径
     std::map<std::string,std::string>envMap;//环境变量表
     int64_t maxErrorRebootCnt;//最大允许的错误启动次数
-    int64_t errorRebootThresholdMsec;//错误启动判断阈值，当一个程序持续运行时间小于此值时判断为一次错误启动
+    int64_t errorRebootThresholdSec;//错误启动判断阈值，当一个程序持续运行时间小于此值时判断为一次错误启动
     //runtime param
     pid_t pid;//当前进程id
     DaemonSessionStatus status;//任务状态
@@ -245,6 +250,7 @@ struct DaemonSession
     int errorBootCnt;//连续的错误启动次数
     //set by loadConfig
     std::string configName;
+    std::string configFilePath;
     //启动程序，若程序已启动 不产生影响
     void start();
     //启动程序，若程序已启动，杀死原有进程重新启动
@@ -256,7 +262,6 @@ struct DaemonSession
     void check();
     bool loadConfig(const std::string&path);
     bool dumpConfig(const std::string&path);
-    bool dumpEnv(const std::string&path);
     //获取状态
     std::pair<std::string,std::string> getStatusString();
     public:
@@ -275,14 +280,32 @@ public:
     ~DaemonSession();
 };
 
-struct DaemonFileParser
-{
-    DaemonFileParser();
-    bool parser(const std::string &filePath);
-    std::string filePath;
-    std::string itemName;
+struct DaemonConfigInfo{
+    std::string fieldName="";
+    std::string description="";
     std::map<std::string,std::string>configMap;
-    ~DaemonFileParser(){}
+    void clear()
+    {
+        fieldName.clear();
+        description.clear();
+        configMap.clear();
+    }
+};
+struct DaemonFileHelper
+{
+    DaemonFileHelper();
+    bool parser(const std::string &filePath);
+    void dump();
+    //remove ' ' '\r' '\n' '\t'
+    static std::string trim(const std::string&src);
+    static bool isTrimCharacter(char c);
+    static std::map<std::string,std::string>splitEnvInput(const std::string&src,char split_char=',');
+    static bool appendItemTofile(const std::string &item_name,const std::string &descritopn,const std::string &comment,FILE *fp);
+    static bool appendKeyValueTofile(const std::string &key,const std::string &value,const std::string &comment,FILE *fp);
+    static bool appendKeyValuelistTofile(const std::string &key,std::list<std::string>valueList,const std::string &comment,FILE *fp);
+    std::string filePath;
+    std::map<std::string,DaemonConfigInfo>itemMap;
+    ~DaemonFileHelper(){}
 };
 }
 

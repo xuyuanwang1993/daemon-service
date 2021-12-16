@@ -364,7 +364,7 @@ void Daemon::initDaemon()
         AIMY_INFO("compile_info:%s %s",__DATE__,__TIME__);
         auto pgid=getpgrp();
         setsid();//分离进程组
-        killpg(pgid,SIGKILL);//关闭原进程组中所有进程
+        //killpg(pgid,SIGKILL);//关闭原进程组中所有进程
         umask(0);
         chdir("/");
 

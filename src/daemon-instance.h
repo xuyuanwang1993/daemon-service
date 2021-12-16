@@ -259,7 +259,7 @@ struct DaemonSession
     bool dumpEnv(const std::string&path);
     //获取状态
     std::pair<std::string,std::string> getStatusString();
-private:
+    public:
     //运行程序
     pid_t exec();
     //回收进程

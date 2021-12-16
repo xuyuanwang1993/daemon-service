@@ -3,6 +3,7 @@
 #include <sys/prctl.h>
 #include <dirent.h>
 #include<set>
+#include<chrono>
 #define DAEMON_SERVICE_VERSION "1.0.0"
 #define DAEMON_CONFIG_FILE_EXAMPLE_NAME "daemonConfig.ini.default"
 #define DAEMON_SESSION_CONFIG_FILE_EXAMPLE_NAME "app.conf.default"
@@ -1176,7 +1177,7 @@ int64_t DaemonSession::getTimetamp()
 {
     timeval now;
     gettimeofday(&now,nullptr);
-    return now.tv_sec*1000+now.tv_usec/1000;
+    return static_cast<int64_t>(static_cast<int64_t>(now.tv_sec)*1000L+static_cast<int64_t>(now.tv_usec)/1000L);
 }
 
 void DaemonSession::resetBootStatus()

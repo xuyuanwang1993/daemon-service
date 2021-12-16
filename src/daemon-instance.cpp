@@ -1548,7 +1548,7 @@ bool DaemonFileHelper::appendItemTofile(const std::string &item_name,const std::
         if(item_name.empty()||!fp)break;
         if(!comment.empty())
         {
-            if(fprintf(fp,"#%s\r\n",comment.c_str())<=0)
+            if(fprintf(fp,"#%s\n",comment.c_str())<=0)
             {
                 AIMY_ERROR("write failed[%s]",strerror(errno));
                 break;
@@ -1556,14 +1556,14 @@ bool DaemonFileHelper::appendItemTofile(const std::string &item_name,const std::
         }
         if(descritopn.empty())
         {
-            if(fprintf(fp,"[%s]\r\n",item_name.c_str())<=0)
+            if(fprintf(fp,"[%s]\n",item_name.c_str())<=0)
             {
                 AIMY_ERROR("write failed[%s]",strerror(errno));
                 break;
             }
         }
         else {
-            if(fprintf(fp,"[%s:%s]\r\n",item_name.c_str(),descritopn.c_str())<=0)
+            if(fprintf(fp,"[%s:%s]\n",item_name.c_str(),descritopn.c_str())<=0)
             {
                 AIMY_ERROR("write failed[%s]",strerror(errno));
                 break;
@@ -1581,7 +1581,7 @@ bool DaemonFileHelper::appendKeyValueTofile(const std::string &key, const std::s
         if(key.empty()||!fp)break;
         if(!comment.empty())
         {
-            if(fprintf(fp,"#%s\r\n",comment.c_str())<=0)
+            if(fprintf(fp,"#%s\n",comment.c_str())<=0)
             {
                 AIMY_ERROR("write failed[%s]",strerror(errno));
                 break;
@@ -1589,14 +1589,14 @@ bool DaemonFileHelper::appendKeyValueTofile(const std::string &key, const std::s
         }
         if(value.empty())
         {
-            if(fprintf(fp,"%s=\r\n",key.c_str())<=0)
+            if(fprintf(fp,"%s=\n",key.c_str())<=0)
             {
                 AIMY_ERROR("write failed[%s]",strerror(errno));
                 break;
             }
         }
         else {
-            if(fprintf(fp,"%s=%s\r\n",key.c_str(),value.c_str())<=0)
+            if(fprintf(fp,"%s=%s\n",key.c_str(),value.c_str())<=0)
             {
                 AIMY_ERROR("write failed[%s]",strerror(errno));
                 break;
@@ -1614,7 +1614,7 @@ bool DaemonFileHelper::appendKeyValuelistTofile(const std::string &key, std::lis
         if(key.empty()||!fp)break;
         if(!comment.empty())
         {
-            if(fprintf(fp,"#%s\r\n",comment.c_str())<=0)
+            if(fprintf(fp,"#%s\n",comment.c_str())<=0)
             {
                 AIMY_ERROR("write failed[%s]",strerror(errno));
                 break;
@@ -1622,7 +1622,7 @@ bool DaemonFileHelper::appendKeyValuelistTofile(const std::string &key, std::lis
         }
         if(valueList.empty())
         {
-            if(fprintf(fp,"%s=\r\n",key.c_str())<=0)
+            if(fprintf(fp,"%s=\n",key.c_str())<=0)
             {
                 AIMY_ERROR("write failed[%s]",strerror(errno));
                 break;
@@ -1630,7 +1630,7 @@ bool DaemonFileHelper::appendKeyValuelistTofile(const std::string &key, std::lis
         }
         else {
             auto iter=valueList.begin();
-            if(fprintf(fp,"%s=%s,\\\r\n",key.c_str(),iter->c_str())<=0)
+            if(fprintf(fp,"%s=%s,\\\n",key.c_str(),iter->c_str())<=0)
             {
                 AIMY_ERROR("write failed[%s]",strerror(errno));
                 break;
@@ -1639,7 +1639,7 @@ bool DaemonFileHelper::appendKeyValuelistTofile(const std::string &key, std::lis
             ++iter;
             for(;iter!=valueList.end();++iter)
             {
-                if(fprintf(fp,"%s,\\\r\n",iter->c_str())<=0)
+                if(fprintf(fp,"%s,\\\n",iter->c_str())<=0)
                 {
                     AIMY_ERROR("write failed[%s]",strerror(errno));
                     failed=true;

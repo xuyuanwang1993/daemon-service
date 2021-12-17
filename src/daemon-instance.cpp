@@ -444,7 +444,12 @@ std::string Daemon::handleOption(const std::string &option1,const std::string &o
             ret="load option need a config file";
         }
         else {
-            ret=m_daemonWorker->loadPath(option2);
+            std::string path;
+            if(option2[0]=='/')path=option2;
+            else {
+                path=m_workPath+"/"+option2;
+            }
+            ret=m_daemonWorker->loadPath(path);
         }
     }
     else {
@@ -518,14 +523,26 @@ void Daemon::handleCommandline(int argc ,char *argv[])
                 printf("%s",helpInfo);
                 return;
             }
-            std::string cmd_data=argv[next_argv_read_pos];
-            ++next_argv_read_pos;
+            std::vector<std::string>optionData;
+            std::string cmd_data;
             while(next_argv_read_pos<argc)
             {
-                cmd_data+=" ";
-                cmd_data+=argv[next_argv_read_pos];
+                optionData.push_back(argv[next_argv_read_pos]);
                 ++next_argv_read_pos;
             }
+            if(optionData.size()>=2&&optionData[0]=="load")
+            {
+                char real_path[4096];
+                memset(real_path,0,4096);
+                realpath(optionData[1].c_str(),real_path);
+                if(strlen(real_path)>0)optionData[1]=real_path;
+            }
+            for(const auto &i:optionData)
+            {
+                if(!cmd_data.empty())cmd_data+=" ";
+                cmd_data+=i;
+            }
+
             //init socket
             std::string path=std::string("/tmp/daemon_client_")+std::to_string(getpid())+".service";
             unix_dgram_socket sock(path);

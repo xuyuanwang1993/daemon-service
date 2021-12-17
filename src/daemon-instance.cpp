@@ -1137,11 +1137,15 @@ void DaemonSession::releaseProcess()
 {
     do{
         if(status!=DaemonSessionRunning)break;
-        if(kill(pid,SIGKILL)==0)
+        if(kill(pid,stopSignal)==0)
         {
             int max_cnts=50;
+            int kill_cnt_threshold=max_cnts/5;
             pid_t ret_pid=0;
-            while((max_cnts-->0)&&(ret_pid=waitpid(pid,nullptr,WNOHANG))!=pid)std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            while((max_cnts-->0)&&(ret_pid=waitpid(pid,nullptr,WNOHANG))!=pid){
+                if(max_cnts==kill_cnt_threshold)kill(pid,killSignal);
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
             if(ret_pid==pid)
             {
                 AIMY_WARNNING("%s exited in active",configName.c_str());
@@ -1303,7 +1307,7 @@ std::pair<string, string> DaemonSession::getStatusString()
     return std::make_pair(std::string(head_str),std::string(buf));
 }
 
-DaemonSession::DaemonSession():sessionType(DAEMON_PROCESS_TYPE),execCmd(""),autoStart(false),autoRestart(true)
+DaemonSession::DaemonSession():sessionType(DAEMON_PROCESS_TYPE),execCmd(""),stopSignal(SIGTERM),killSignal(SIGKILL),autoStart(false),autoRestart(true)
   ,startDelaySec(0),restartIntervalSec(5),workPath(""),env(""),maxErrorRebootCnt(0),
     errorRebootThresholdSec(0),pid(0),status(DaemonSessionExited)
   ,lastBootTime(0),nextBootTime(0),bootCnt(0),lastRebootCnt(0),errorBootCnt(0),configName("default"),configFilePath("")

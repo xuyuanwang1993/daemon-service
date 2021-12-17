@@ -231,6 +231,8 @@ struct DaemonSession
     //read from config
     std::string sessionType;//任务类型 process or shellscript
     std::string execCmd;//执行命令
+    int stopSignal;//停止信号
+    int killSignal;//强制退出信号
     bool autoStart;//自动启动
     bool autoRestart;//自动重新启动
     int64_t startDelaySec;//初始启动延时
